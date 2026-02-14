@@ -57,7 +57,7 @@ async function handleBuy(interaction, itemId) {
     const eco = getEconomy(interaction.user.id, interaction.guild.id);
     if (eco.balance < item.price) {
         return interaction.reply({
-            embeds: [errorEmbed("Can't Afford!", `You need ₪${item.price.toLocaleString()} but only have ₪${eco.balance.toLocaleString()}.\n\nGo ` / work` or ` / daily` to earn more!`)],
+            embeds: [errorEmbed("Can't Afford!", `You need ₪${item.price.toLocaleString()} but only have ₪${eco.balance.toLocaleString()}.\n\nGo \`/work\` or \`/daily\` to earn more!`)],
             ephemeral: true,
         });
     }

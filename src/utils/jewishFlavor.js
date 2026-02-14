@@ -101,6 +101,14 @@ const ROASTS = [
   "{user} is the 11th plague that didn't make the cut.",
   "{user} makes Pharaoh look like a reasonable person.",
   "{user} is what happens when you open the door for Elijah and the wrong person walks in.",
+  "{user} talks so much, even the Western Wall would tell them to shut up.",
+  "{user} is like unleavened bread at a five-star restaurant — technically present but fundamentally out of place.",
+  "{user}'s family tree is a cactus. Everyone on it is a prick.",
+  "{user} is the reason God rested on the seventh day — He needed a break from creating disappointments.",
+  "{user} has the survival instincts of Pharaoh's army at the Red Sea.",
+  "{user} is the human version of a participation trophy at a Torah quiz.",
+  "{user} would lose a debate to a falafel ball. And the falafel would be more articulate.",
+  "{user} is the kind of person who brings store-bought hummus to a potluck and calls it homemade.",
 ];
 
 /** Random Jewish jokes (setup + punchline) */
@@ -120,6 +128,11 @@ const JOKES = [
   { setup: "What do you call cheese that isn't yours in Israel?", punchline: "Nacho cheese — it's THE cheese." },
   { setup: "Why did the Jewish boy fail his driving test?", punchline: "He kept trying to negotiate the right of way." },
   { setup: "What's the most popular pick-up line in Israel?", punchline: "\"Is your father a terrorist? Because you're the bomb.\" (Too edgy? The IDF says it's fine.)" },
+  { setup: "What did the waiter ask the group of dining Jewish mothers?", punchline: "\"Is ANYTHING all right?\"" },
+  { setup: "Why do Jewish divorces cost so much?", punchline: "Because they're worth it." },
+  { setup: "What's the difference between a Rottweiler and a Jewish mother?", punchline: "Eventually, the Rottweiler lets go." },
+  { setup: "How do you know when you're at an Orthodox wedding?", punchline: "The mother of the bride is pregnant too." },
+  { setup: "Why did the Israelite bring a ladder to the bar?", punchline: "Because the drinks were on the house. Just like the manna." },
 ];
 
 /** Random Israel/Judaism facts */
@@ -237,6 +250,11 @@ const MEME_CAPTIONS = [
   "Israelis in line at the airport:\nWhat line? We don't do lines. 🇮🇱",
   "Jewish moms when you say you're not hungry:\n\"EAT. YOU'RE SKIN AND BONES.\" *puts 3 plates in front of you*",
   "When someone asks what Yom Kippur is:\n\"It's like a 25-hour timeout for your stomach\"",
+  "Me explaining to my goyish friends why I can't hang out on Friday night:\n*It's complicated* 🕯️",
+  "When someone says 'Happy Holidays' instead of 'Happy Hanukkah':\n*Technically correct but spiritually insufficient*",
+  "Israeli moms packing lunch for a 20-minute trip:\n*packs enough food for the Exodus*",
+  "When someone asks how old the State of Israel is:\n*Depends — do you count from 1948 or from Abraham?*",
+  "POV: You're the last person to get picked for the hora circle:\n💀",
 ];
 
 /** Leveling rank names */
@@ -334,8 +352,13 @@ function getGoodbyeMessage(username) {
 }
 
 /** Get a random meme caption */
-function getMemeCatption() {
+function getMemeCaption() {
   return random(MEME_CAPTIONS);
+}
+
+/** @deprecated Use getMemeCaption instead */
+function getMemeCatption() {
+  return getMemeCaption();
 }
 
 /** Get rank name for a given level */
@@ -364,5 +387,5 @@ module.exports = {
   random, getFooterQuip, getStatusMessage, getJewballResponse,
   getRoast, getJoke, getFact, getWorkJob, getHebrewWord,
   getMatchmakerResult, getWelcomeMessage, getGoodbyeMessage,
-  getMemeCatption, getRankForLevel, xpForLevel, levelFromXp,
+  getMemeCaption, getMemeCatption, getRankForLevel, xpForLevel, levelFromXp,
 };

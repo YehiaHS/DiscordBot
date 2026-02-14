@@ -15,7 +15,9 @@ let data = {
   settings: {},
   reaction_roles: [],
   logs: [],
-  role_rewards: {}
+  role_rewards: {},
+  afk: {},
+  cooldowns: {}
 };
 
 /**
@@ -134,6 +136,22 @@ function getEconomyLeaderboard(guildId, limit = 10) {
     .filter(e => e.guild_id === guildId)
     .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank))
     .slice(0, limit);
+}
+
+function addBank(userId, guildId, amount) {
+  ensureEconomy(userId, guildId);
+  const key = `${userId}-${guildId}`;
+  data.economy[key].bank += amount;
+  saveDatabase();
+  return data.economy[key];
+}
+
+function subtractBank(userId, guildId, amount) {
+  ensureEconomy(userId, guildId);
+  const key = `${userId}-${guildId}`;
+  data.economy[key].bank = Math.max(0, data.economy[key].bank - amount);
+  saveDatabase();
+  return data.economy[key];
 }
 
 // ----- Inventory Operations -----
@@ -258,10 +276,53 @@ function removeRoleReward(guildId, level) {
   }
 }
 
+// ----- AFK Operations -----
+
+function setAfk(userId, guildId, message) {
+  const key = `${userId}-${guildId}`;
+  if (!data.afk) data.afk = {};
+  data.afk[key] = { user_id: userId, guild_id: guildId, message, timestamp: Date.now() };
+  saveDatabase();
+}
+
+function getAfk(userId, guildId) {
+  const key = `${userId}-${guildId}`;
+  if (!data.afk) data.afk = {};
+  return data.afk[key] || null;
+}
+
+function removeAfk(userId, guildId) {
+  const key = `${userId}-${guildId}`;
+  if (!data.afk) data.afk = {};
+  delete data.afk[key];
+  saveDatabase();
+}
+
+function getAllAfk(guildId) {
+  if (!data.afk) data.afk = {};
+  return Object.values(data.afk).filter(a => a.guild_id === guildId);
+}
+
+// ----- Cooldown Operations -----
+
+function getCooldown(userId, guildId, action) {
+  if (!data.cooldowns) data.cooldowns = {};
+  const key = `${userId}-${guildId}-${action}`;
+  return data.cooldowns[key] || 0;
+}
+
+function setCooldown(userId, guildId, action) {
+  if (!data.cooldowns) data.cooldowns = {};
+  const key = `${userId}-${guildId}-${action}`;
+  data.cooldowns[key] = Date.now();
+  saveDatabase();
+}
+
 module.exports = {
-  initDatabase, getDb,
+  initDatabase, getDb, saveDatabase,
   getXp, addXp, getLeaderboard,
   getEconomy, ensureEconomy, addBalance, setBalance,
+  addBank, subtractBank,
   updateLastDaily, updateLastWork, updateLastRob, getEconomyLeaderboard,
   getInventory, hasItem, addItem,
   addWarning, getWarnings,
@@ -269,5 +330,7 @@ module.exports = {
   addReactionRole, getReactionRole, removeReactionRole,
   addLog, getLogs,
   addRoleReward, getRoleRewards, removeRoleReward,
+  setAfk, getAfk, removeAfk, getAllAfk,
+  getCooldown, setCooldown,
 };
 

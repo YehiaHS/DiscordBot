@@ -9,6 +9,7 @@ const { loadCommands } = require("./handlers/commandHandler");
 const { loadEvents } = require("./handlers/eventHandler");
 const { initDatabase } = require("./utils/database");
 const { startMossadAgent } = require("./features/mossadAgent");
+const { startDashboard } = require("./features/dashboardServer");
 
 // Validate token exists
 if (!process.env.DISCORD_TOKEN) {
@@ -42,6 +43,7 @@ initDatabase();
 loadCommands(client);
 loadEvents(client);
 startMossadAgent(client);
+startDashboard(client);
 
 // Login
 client.login(process.env.DISCORD_TOKEN);

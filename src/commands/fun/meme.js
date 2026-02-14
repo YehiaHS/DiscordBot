@@ -2,7 +2,7 @@
  * /meme — Random Jewish/Israel meme caption.
  */
 const { SlashCommandBuilder } = require("discord.js");
-const { getMemeCatption } = require("../../utils/jewishFlavor");
+const { getMemeCaption } = require("../../utils/jewishFlavor");
 const { createEmbed, COLORS } = require("../../utils/embedBuilder");
 
 module.exports = {
@@ -14,7 +14,7 @@ module.exports = {
         return interaction.reply({
             embeds: [createEmbed({
                 title: "Jewish Meme 😂",
-                description: getMemeCatption(),
+                description: getMemeCaption(),
                 color: COLORS.FUN,
             })],
         });

@@ -1,5 +1,6 @@
 /**
  * InteractionCreate event — routes slash commands to their handlers.
+ * Appends category-aware Mossad remarks to every response.
  */
 const { errorEmbed } = require("../utils/embedBuilder");
 
@@ -32,30 +33,24 @@ module.exports = {
         }
 
         try {
-            // Helper to hijack the reply and add the remark
+            const { getRandomRemark } = require("../utils/mossadRemarks");
+            const category = command.category || null;
+
+            // Wrap reply to append a remark
             const originalReply = interaction.reply.bind(interaction);
             const originalFollowUp = interaction.followUp.bind(interaction);
-            const { getRandomRemark } = require("../utils/mossadRemarks");
+            const originalEditReply = interaction.editReply.bind(interaction);
 
             interaction.reply = async (options) => {
-                const remark = getRandomRemark();
-                if (typeof options === 'string') options = { content: options };
-                if (options.embeds) {
-                    options.content = options.content ? `${options.content}\n\n*${remark}*` : `*${remark}*`;
-                } else if (!options.content) {
-                    options.content = `*${remark}*`;
-                } else {
-                    options.content += `\n\n*${remark}*`;
-                }
-                return originalReply(options);
+                return originalReply(appendRemark(options, category));
             };
 
             interaction.followUp = async (options) => {
-                const remark = getRandomRemark();
-                if (typeof options === 'string') options = { content: options };
-                if (options.content) options.content += `\n\n*${remark}*`;
-                else options.content = `*${remark}*`;
-                return originalFollowUp(options);
+                return originalFollowUp(appendRemark(options, category));
+            };
+
+            interaction.editReply = async (options) => {
+                return originalEditReply(appendRemark(options, category));
             };
 
             await command.execute(interaction);
@@ -65,12 +60,44 @@ module.exports = {
                 embeds: [errorEmbed("Error!", "Something went wrong! Even the Mossad couldn't figure this one out. 💀")],
                 ephemeral: true,
             };
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp(reply);
-            } else {
-                await interaction.reply(reply);
+
+            try {
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp(reply);
+                } else {
+                    await interaction.reply(reply);
+                }
+            } catch (replyError) {
+                console.error("Failed to send error reply:", replyError);
             }
         }
-
     },
 };
+
+/**
+ * Appends a Mossad remark to a reply options object.
+ * @param {object|string} options
+ * @param {string|null} category
+ * @returns {object}
+ */
+function appendRemark(options, category) {
+    const { getRandomRemark } = require("../utils/mossadRemarks");
+    const remark = getRandomRemark(category);
+
+    if (typeof options === 'string') {
+        options = { content: options };
+    }
+
+    // Don't append to ephemeral error messages
+    if (options.ephemeral) return options;
+
+    if (options.embeds && options.embeds.length > 0) {
+        options.content = options.content ? `${options.content}\n\n*${remark}*` : `*${remark}*`;
+    } else if (!options.content) {
+        options.content = `*${remark}*`;
+    } else {
+        options.content += `\n\n*${remark}*`;
+    }
+
+    return options;
+}

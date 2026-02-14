@@ -3,6 +3,7 @@
  */
 const { ActivityType } = require("discord.js");
 const { getStatusMessage } = require("../utils/jewishFlavor");
+const { rescheduleAll } = require("../commands/utility/schedule");
 
 module.exports = {
     name: "ready",
@@ -18,5 +19,13 @@ module.exports = {
         setInterval(() => {
             client.user.setActivity(getStatusMessage(), { type: ActivityType.Custom });
         }, 30_000);
+
+        // Reschedule any pending scheduled messages from before restart
+        try {
+            rescheduleAll(client);
+            console.log("✡️ Rescheduled pending messages.");
+        } catch (e) {
+            console.error("Failed to reschedule messages:", e);
+        }
     },
 };

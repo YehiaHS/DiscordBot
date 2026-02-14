@@ -1,7 +1,8 @@
 /**
- * MessageReactionAdd event — handles reaction role grants.
+ * MessageReactionAdd event — handles reaction roles AND starboard.
  */
 const { getReactionRole } = require("../utils/database");
+const { handleStarboardReaction } = require("../features/starboard");
 
 module.exports = {
     name: "messageReactionAdd",
@@ -14,18 +15,28 @@ module.exports = {
             try { await reaction.fetch(); } catch { return; }
         }
 
-        const emoji = reaction.emoji.id ? reaction.emoji.id : reaction.emoji.name;
-        const rr = getReactionRole(reaction.message.id, emoji);
-        if (!rr) return;
+        // --- Starboard ---
+        try {
+            await handleStarboardReaction(reaction, user);
+        } catch (e) {
+            console.error('Starboard reaction error:', e);
+        }
 
-        const guild = reaction.message.guild;
-        if (!guild) return;
+        // --- Reaction Roles ---
+        const emoji = reaction.emoji.id ? reaction.emoji.id : reaction.emoji.name;
+        const messageId = reaction.message.id;
+        const guildId = reaction.message.guild?.id;
+
+        if (!guildId) return;
+
+        const config = getReactionRole(guildId, messageId, emoji);
+        if (!config) return;
 
         try {
-            const member = await guild.members.fetch(user.id);
-            await member.roles.add(rr.role_id);
-        } catch (error) {
-            console.error("Failed to add reaction role:", error);
+            const member = await reaction.message.guild.members.fetch(user.id);
+            await member.roles.add(config.role_id, 'Reaction role');
+        } catch (e) {
+            console.error('Failed to add reaction role:', e);
         }
     },
 };

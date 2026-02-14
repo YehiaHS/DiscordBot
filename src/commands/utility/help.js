@@ -1,12 +1,13 @@
 /**
  * /help — Lists all commands organized by category.
+ * Uses the command.category property set by the command handler.
  */
 const { SlashCommandBuilder } = require("discord.js");
 const { createEmbed, COLORS } = require("../../utils/embedBuilder");
 
 const CATEGORIES = {
     moderation: { name: "⚖️ Moderation", description: "Keep order in the Promised Land" },
-    economy: { name: "💰 Economy (Shekels)", description: "Earn, spend, and gamble your shekels" },
+    economy: { name: "💰 Economy (Shekels)", description: "Earn, spend, gamble, and bank your shekels" },
     leveling: { name: "📊 Leveling", description: "Climb the ranks of the chosen" },
     fun: { name: "😂 Fun", description: "Entertainment, Jewish-style" },
     utility: { name: "🔧 Utility", description: "Useful tools for the tribe" },
@@ -35,24 +36,12 @@ module.exports = {
 
         if (filter) {
             const cat = CATEGORIES[filter];
-            const cmds = commands.filter((c) => {
-                const filePath = require.resolve(`./../${filter}/${c.data.name}`).toLowerCase();
-                return filePath.includes(`\\${filter}\\`) || filePath.includes(`/${filter}/`);
-            });
-
-            // Fallback: just get commands whose files are in that category
-            const categoryCommands = [];
-            const fs = require("fs");
-            const path = require("path");
-            const catDir = path.join(__dirname, "..", filter);
-            if (fs.existsSync(catDir)) {
-                const files = fs.readdirSync(catDir).filter((f) => f.endsWith(".js"));
-                for (const file of files) {
-                    const name = file.replace(".js", "");
-                    const cmd = commands.get(name);
-                    if (cmd) categoryCommands.push(cmd);
-                }
+            if (!cat) {
+                return interaction.reply({ content: "Unknown category.", ephemeral: true });
             }
+
+            // Use the category property attached by commandHandler
+            const categoryCommands = commands.filter((c) => c.category === filter);
 
             const cmdList = categoryCommands.map((c) =>
                 `\`/${c.data.name}\` — ${c.data.description}`
@@ -61,22 +50,16 @@ module.exports = {
             return interaction.reply({
                 embeds: [createEmbed({
                     title: `Help — ${cat.name}`,
-                    description: `${cat.description}\n\n${cmdList || "No commands found."}`,
+                    description: `${cat.description}\n\n${cmdList || "No commands found in this category."}`,
                     color: COLORS.INFO,
                 })],
                 ephemeral: true,
             });
         }
 
-        // Show all categories
+        // Show all categories with command counts
         const fields = Object.entries(CATEGORIES).map(([key, cat]) => {
-            const fs = require("fs");
-            const path = require("path");
-            const catDir = path.join(__dirname, "..", key);
-            let count = 0;
-            if (fs.existsSync(catDir)) {
-                count = fs.readdirSync(catDir).filter((f) => f.endsWith(".js")).length;
-            }
+            const count = commands.filter((c) => c.category === key).size;
             return {
                 name: cat.name,
                 value: `${cat.description}\n*${count} commands* — \`/help category:${key}\``,
