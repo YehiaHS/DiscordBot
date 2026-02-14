@@ -345,35 +345,101 @@ function renderSettingControl(key, s, value) {
     `;
 }
 
-// -- CUSTOM COMMANDS PAGE --
+// -- CUSTOM COMMANDS PAGE (Enhanced Command Workshop) --
+let builtinFunctions = {};
+
 async function renderCustomCommands() {
+    // Fetch built-in functions list
+    try { builtinFunctions = await api('/builtin-functions'); } catch (e) { builtinFunctions = {}; }
+
+    const fnOptions = Object.entries(builtinFunctions).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+
     $pageContainer.innerHTML = `
         <div class="page">
             <div class="page-header">
-                <h2 class="page-title">⚡ Custom Commands</h2>
-                <p class="page-description">Create custom text commands that respond to triggers. Type the trigger in chat and the bot responds.</p>
+                <h2 class="page-title">⚡ Command Workshop</h2>
+                <p class="page-description">Forge custom commands with text responses, built-in functions, or your own JavaScript code. All commands are triggered by typing their trigger phrase in chat.</p>
             </div>
 
             <div class="card" style="margin-bottom: 20px;">
                 <div class="card-header">
-                    <span class="card-title">Add New Command</span>
+                    <span class="card-title">🔧 Create New Command</span>
                 </div>
+
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Trigger</label>
                         <input type="text" id="cmd-trigger" class="form-input" placeholder="!hello" style="width: 100%;">
                     </div>
-                    <div class="form-group" style="flex: 3;">
-                        <label class="form-label">Response</label>
-                        <input type="text" id="cmd-response" class="form-input" placeholder="Shalom! Welcome to the server!" style="width: 100%;">
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <input type="text" id="cmd-description" class="form-input" placeholder="A friendly greeting" style="width: 100%;">
                     </div>
-                    <button class="btn btn-primary" onclick="addCustomCommand()">Add</button>
+                </div>
+
+                <div class="form-row" style="margin-top: 12px;">
+                    <div class="form-group">
+                        <label class="form-label">Command Type</label>
+                        <select id="cmd-type" class="form-input" onchange="updateCmdTypeUI()" style="width: 100%;">
+                            <option value="text">📝 Text Response</option>
+                            <option value="function">⚡ Built-in Function</option>
+                            <option value="code">💻 Custom Code</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="display: flex; align-items: flex-end; gap: 8px;">
+                        <label class="form-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="cmd-embed"> Wrap in embed
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Text Response -->
+                <div id="cmd-text-section" style="margin-top: 12px;">
+                    <div class="form-group">
+                        <label class="form-label">Response Text</label>
+                        <textarea id="cmd-response" class="form-input" rows="3" placeholder="Shalom {user}! Welcome to {server}!" style="width: 100%; resize: vertical; font-family: 'JetBrains Mono', monospace; font-size: 13px;"></textarea>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                            Template variables: <code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{members}</code> <code>{channel}</code> <code>{random:1-100}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Function Selection -->
+                <div id="cmd-function-section" style="margin-top: 12px; display: none;">
+                    <div class="form-group">
+                        <label class="form-label">Built-in Function</label>
+                        <select id="cmd-function" class="form-input" style="width: 100%;">
+                            ${fnOptions}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Code Editor -->
+                <div id="cmd-code-section" style="margin-top: 12px; display: none;">
+                    <div class="form-group">
+                        <label class="form-label">JavaScript Code</label>
+                        <textarea id="cmd-code" class="form-input" rows="6" placeholder="// Available: user, server, channel, random(min, max), pick(a, b, c...)&#10;// Return a string&#10;return pick('Shalom!', 'Ahalan!', 'Merhaba!') + ' ' + user.displayName" style="width: 100%; resize: vertical; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.6;"></textarea>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                            API: <code>user.username</code> <code>user.displayName</code> <code>user.mention</code> <code>server.name</code> <code>server.members</code> <code>channel.name</code> <code>random(1,100)</code> <code>pick(a,b,c)</code> — 1s timeout, sandboxed.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row" style="margin-top: 16px; gap: 10px;">
+                    <button class="btn btn-primary" onclick="addCustomCommand()">Create Command</button>
+                    <button class="btn" style="background: var(--surface-2); color: var(--text-secondary);" onclick="testCustomCommand()">🧪 Test</button>
+                </div>
+
+                <div id="cmd-test-output" style="display: none; margin-top: 12px; padding: 12px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;">
+                    <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Test Output:</div>
+                    <div id="cmd-test-result" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--brand);"></div>
                 </div>
             </div>
 
             <div class="card">
                 <div class="card-header">
                     <span class="card-title">Active Commands</span>
+                    <span id="cmd-count" style="color: var(--text-muted); font-size: 13px;"></span>
                 </div>
                 <div id="cmd-list">
                     <div class="empty-state"><div class="empty-icon">⚡</div><div class="empty-text">Loading...</div></div>
@@ -382,18 +448,38 @@ async function renderCustomCommands() {
         </div>
     `;
 
+    // Load existing commands
     try {
         const commands = await api('/custom-commands');
         const container = document.getElementById('cmd-list');
+        const countEl = document.getElementById('cmd-count');
+
         if (!commands.length) {
-            container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div><div class="empty-text">No custom commands yet. Add one above!</div></div>';
+            container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div><div class="empty-text">No custom commands yet. Create one above!</div></div>';
+            countEl.textContent = '(0)';
             return;
         }
+
+        countEl.textContent = `(${commands.length})`;
+        const typeIcons = { text: '📝', function: '⚡', code: '💻' };
+        const typeLabels = { text: 'Text', function: 'Function', code: 'Code' };
+
         container.innerHTML = commands.map(cmd => `
             <div class="cmd-item">
-                <div>
-                    <div class="cmd-trigger">${escapeHtml(cmd.trigger)}</div>
-                    <div class="cmd-response">${escapeHtml(cmd.response)}</div>
+                <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                        <span class="cmd-trigger">${escapeHtml(cmd.trigger)}</span>
+                        <span style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--surface-2); color: var(--text-muted);">
+                            ${typeIcons[cmd.type] || '📝'} ${typeLabels[cmd.type] || 'Text'}
+                        </span>
+                        ${cmd.embed ? '<span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--brand-dim); color: var(--brand);">Embed</span>' : ''}
+                    </div>
+                    <div class="cmd-response" style="opacity: 0.7; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        ${cmd.type === 'function' ? '⚡ ' + escapeHtml(cmd.functionName) : ''}
+                        ${cmd.type === 'code' ? '💻 ' + escapeHtml((cmd.code || '').slice(0, 60)) : ''}
+                        ${(!cmd.type || cmd.type === 'text') ? escapeHtml((cmd.response || '').slice(0, 80)) : ''}
+                    </div>
+                    ${cmd.description ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${escapeHtml(cmd.description)}</div>` : ''}
                 </div>
                 <button class="btn btn-danger btn-sm" onclick="deleteCustomCommand('${escapeHtml(cmd.trigger)}')">Delete</button>
             </div>
@@ -403,16 +489,57 @@ async function renderCustomCommands() {
     }
 }
 
+window.updateCmdTypeUI = function () {
+    const type = document.getElementById('cmd-type').value;
+    document.getElementById('cmd-text-section').style.display = type === 'text' ? 'block' : 'none';
+    document.getElementById('cmd-function-section').style.display = type === 'function' ? 'block' : 'none';
+    document.getElementById('cmd-code-section').style.display = type === 'code' ? 'block' : 'none';
+};
+
 window.addCustomCommand = async function () {
     const trigger = document.getElementById('cmd-trigger').value.trim();
-    const response = document.getElementById('cmd-response').value.trim();
-    if (!trigger || !response) {
-        toast('Both trigger and response are required.', 'error');
-        return;
+    const type = document.getElementById('cmd-type').value;
+    const description = document.getElementById('cmd-description').value.trim();
+    const embed = document.getElementById('cmd-embed').checked;
+    const response = document.getElementById('cmd-response')?.value.trim();
+    const functionName = document.getElementById('cmd-function')?.value;
+    const code = document.getElementById('cmd-code')?.value.trim();
+
+    if (!trigger) { toast('Trigger is required.', 'error'); return; }
+    if (type === 'text' && !response) { toast('Response text is required.', 'error'); return; }
+    if (type === 'code' && !code) { toast('Code is required.', 'error'); return; }
+
+    try {
+        const result = await api('/custom-commands', {
+            method: 'POST',
+            body: { trigger, type, response, functionName, code, description, embed }
+        });
+        if (result.error) { toast(result.error, 'error'); return; }
+        toast(`Command "${trigger}" created!`);
+        renderCustomCommands();
+    } catch (e) {
+        toast('Failed to create command.', 'error');
     }
-    await api('/custom-commands', { method: 'POST', body: { trigger, response } });
-    toast(`Command "${trigger}" created!`);
-    renderCustomCommands();
+};
+
+window.testCustomCommand = async function () {
+    const type = document.getElementById('cmd-type').value;
+    const response = document.getElementById('cmd-response')?.value.trim();
+    const functionName = document.getElementById('cmd-function')?.value;
+    const code = document.getElementById('cmd-code')?.value.trim();
+
+    try {
+        const result = await api('/custom-commands/test', {
+            method: 'POST',
+            body: { type, response, functionName, code }
+        });
+        const output = document.getElementById('cmd-test-output');
+        const resultEl = document.getElementById('cmd-test-result');
+        output.style.display = 'block';
+        resultEl.textContent = result.result || '(empty response)';
+    } catch (e) {
+        toast('Test failed.', 'error');
+    }
 };
 
 window.deleteCustomCommand = async function (trigger) {

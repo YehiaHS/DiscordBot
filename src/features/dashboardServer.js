@@ -1,5 +1,6 @@
 /**
  * Embedded Dashboard Server — generates temporary authenticated sessions.
+ * Uses Cloudflare Quick Tunnels for public URLs (no account needed).
  * Runs inside the bot process so it has direct access to the Discord client.
  */
 const express = require('express');
@@ -7,6 +8,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const {
     getDb, getSetting, setSetting, saveDatabase,
     getLeaderboard, getEconomyLeaderboard, getLogs,
@@ -28,6 +30,9 @@ setInterval(() => {
 
 let app, server, io;
 let dashboardClient = null; // Discord client reference
+let tunnelUrl = null;       // Cloudflare Quick Tunnel public URL
+let tunnelProcess = null;   // The cloudflared child process
+let tunnelReady = false;    // Whether the tunnel URL has been resolved
 const PORT = parseInt(process.env.DASHBOARD_PORT || '3847');
 
 /**
@@ -136,19 +141,142 @@ const CONFIG_SCHEMA = {
     },
 };
 
+// ============================================================================
+// CLOUDFLARE QUICK TUNNEL
+// ============================================================================
+
+/**
+ * Available built-in functions that custom commands can use.
+ * Exposed to the dashboard and the /customcmd command.
+ */
+const BUILTIN_FUNCTIONS = {
+    getJoke: { label: 'Random Jewish Joke', module: '../utils/jewishFlavor', fn: 'getJoke' },
+    getRoast: { label: 'Random Roast', module: '../utils/jewishFlavor', fn: 'getRoast' },
+    getFact: { label: 'Random Jewish Fact', module: '../utils/jewishFlavor', fn: 'getFact' },
+    getHebrewWord: { label: 'Random Hebrew Word', module: '../utils/jewishFlavor', fn: 'getHebrewWord' },
+    getMemeCaption: { label: 'Random Meme Caption', module: '../utils/jewishFlavor', fn: 'getMemeCaption' },
+    getWelcomeMessage: { label: 'Welcome Message', module: '../utils/jewishFlavor', fn: 'getWelcomeMessage' },
+    getStatusMessage: { label: 'Status Message', module: '../utils/jewishFlavor', fn: 'getStatusMessage' },
+    random_number: { label: 'Random Number (1-100)', builtinCode: 'Math.floor(Math.random() * 100) + 1' },
+    coinflip: { label: 'Coin Flip', builtinCode: 'Math.random() < 0.5 ? "Heads ✡️" : "Tails 🕎"' },
+    eightball: { label: 'Jewish 8-Ball', builtinCode: '["It is certain, as certain as Shabbat.","The Torah says yes.","Ask your Rabbi.","The Sanhedrin is undecided.","Not even Moses could answer that.","Signs point to oy vey.","Better luck after Havdalah.","Absolutely, mazel tov!","The dreidel landed on Nun: no.","Consult the Dead Sea Scrolls."][Math.floor(Math.random()*10)]' },
+};
+
+/**
+ * Start a Cloudflare Quick Tunnel to get a public URL.
+ * Falls back to localhost if cloudflared is not installed.
+ */
+function startTunnel() {
+    return new Promise((resolve) => {
+        // Try to find cloudflared
+        const cmd = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
+
+        try {
+            tunnelProcess = spawn(cmd, ['tunnel', '--url', `http://localhost:${PORT}`, '--no-autoupdate'], {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                detached: false,
+            });
+
+            let resolved = false;
+
+            const parseUrl = (data) => {
+                const text = data.toString();
+                // Cloudflare outputs the URL on stderr in format:
+                // ... https://NAME.trycloudflare.com ...
+                const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+                if (match && !resolved) {
+                    resolved = true;
+                    tunnelUrl = match[0];
+                    tunnelReady = true;
+                    console.log(`🌐 Cloudflare Tunnel active: ${tunnelUrl}`);
+                    resolve(tunnelUrl);
+                }
+            };
+
+            tunnelProcess.stdout.on('data', parseUrl);
+            tunnelProcess.stderr.on('data', parseUrl);
+
+            tunnelProcess.on('error', (err) => {
+                if (!resolved) {
+                    resolved = true;
+                    console.warn(`⚠️ cloudflared not found. Dashboard will use localhost.`);
+                    console.warn(`   Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/`);
+                    console.warn(`   Termux:  pkg install cloudflared`);
+                    tunnelUrl = null;
+                    tunnelReady = true;
+                    resolve(null);
+                }
+            });
+
+            tunnelProcess.on('exit', (code) => {
+                if (!resolved) {
+                    resolved = true;
+                    tunnelUrl = null;
+                    tunnelReady = true;
+                    resolve(null);
+                }
+                console.log(`🌐 Cloudflare tunnel exited with code ${code}`);
+                tunnelProcess = null;
+            });
+
+            // Timeout after 30 seconds
+            setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    console.warn('⚠️ Cloudflare tunnel timed out. Using localhost.');
+                    tunnelUrl = null;
+                    tunnelReady = true;
+                    resolve(null);
+                }
+            }, 30_000);
+
+        } catch (e) {
+            console.warn('⚠️ Failed to start cloudflared:', e.message);
+            tunnelUrl = null;
+            tunnelReady = true;
+            resolve(null);
+        }
+    });
+}
+
+/**
+ * Stop the Cloudflare tunnel process.
+ */
+function stopTunnel() {
+    if (tunnelProcess) {
+        tunnelProcess.kill('SIGTERM');
+        tunnelProcess = null;
+        tunnelUrl = null;
+        tunnelReady = false;
+        console.log('🌐 Cloudflare tunnel stopped.');
+    }
+}
+
+/**
+ * Get the current public URL (tunnel or localhost fallback).
+ */
+function getPublicUrl() {
+    return tunnelUrl || `http://localhost:${PORT}`;
+}
+
+// ============================================================================
+// SESSION MANAGEMENT
+// ============================================================================
+
 /**
  * Creates a temporary dashboard session.
  * @param {string} guildId
  * @param {string} userId
  * @param {number} ttlMinutes - Session lifetime in minutes
- * @returns {{ token: string, url: string, expiresAt: number }}
+ * @returns {{ token: string, url: string, expiresAt: number, isTunnel: boolean }}
  */
 function createSession(guildId, userId, ttlMinutes = 15) {
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = Date.now() + ttlMinutes * 60_000;
     sessions.set(token, { guildId, userId, createdAt: Date.now(), expiresAt });
-    const url = `http://localhost:${PORT}/panel?token=${token}`;
-    return { token, url, expiresAt };
+    const baseUrl = getPublicUrl();
+    const url = `${baseUrl}/panel?token=${token}`;
+    return { token, url, expiresAt, isTunnel: !!tunnelUrl };
 }
 
 /**
@@ -166,11 +294,136 @@ function validateSession(token) {
     return session;
 }
 
+// ============================================================================
+// CUSTOM COMMAND EXECUTION ENGINE
+// ============================================================================
+
+/**
+ * Execute a custom command.
+ * @param {object} cmd - The custom command definition
+ * @param {import('discord.js').Message} message - The triggering message
+ * @returns {string|null} The response text, or null if failed
+ */
+function executeCustomCommand(cmd, message) {
+    try {
+        // Type: text — simple static response
+        if (!cmd.type || cmd.type === 'text') {
+            let response = cmd.response || '';
+            // Template variables
+            response = response
+                .replace(/\{user\}/g, message.author.toString())
+                .replace(/\{username\}/g, message.author.displayName || message.author.username)
+                .replace(/\{server\}/g, message.guild.name)
+                .replace(/\{members\}/g, String(message.guild.memberCount))
+                .replace(/\{channel\}/g, message.channel.toString())
+                .replace(/\{random:(\d+)-(\d+)\}/g, (_, min, max) => {
+                    return String(Math.floor(Math.random() * (parseInt(max) - parseInt(min) + 1)) + parseInt(min));
+                });
+            return response;
+        }
+
+        // Type: function — use a built-in function
+        if (cmd.type === 'function') {
+            const builtin = BUILTIN_FUNCTIONS[cmd.functionName];
+            if (!builtin) return `⚠️ Unknown function: ${cmd.functionName}`;
+
+            if (builtin.builtinCode) {
+                // Inline expression
+                const fn = new Function('message', `return ${builtin.builtinCode}`);
+                return String(fn(message));
+            }
+
+            // Module function
+            const mod = require(builtin.module);
+            const result = mod[builtin.fn](message.author.toString());
+            return String(result);
+        }
+
+        // Type: code — sandboxed custom JavaScript
+        if (cmd.type === 'code') {
+            return executeSandboxedCode(cmd.code, message);
+        }
+
+        return cmd.response || '⚠️ No response configured.';
+    } catch (e) {
+        console.error('Custom command execution error:', e);
+        return `⚠️ Command error: ${e.message}`;
+    }
+}
+
+/**
+ * Execute user-provided JavaScript in a sandboxed environment.
+ * Uses Node's vm module with a strict timeout and limited API surface.
+ * @param {string} code - The user's JavaScript code
+ * @param {import('discord.js').Message} message - The triggering message
+ * @returns {string} The result
+ */
+function executeSandboxedCode(code, message) {
+    const vm = require('vm');
+
+    // Safe API surface exposed to custom code
+    const sandbox = {
+        // User context
+        user: {
+            id: message.author.id,
+            username: message.author.username,
+            displayName: message.author.displayName || message.author.username,
+            avatar: message.author.displayAvatarURL(),
+            mention: message.author.toString(),
+        },
+        server: {
+            name: message.guild.name,
+            members: message.guild.memberCount,
+            id: message.guild.id,
+        },
+        channel: {
+            name: message.channel.name,
+            id: message.channel.id,
+            mention: message.channel.toString(),
+        },
+        // Utility
+        Math: Math,
+        Date: Date,
+        JSON: JSON,
+        parseInt: parseInt,
+        parseFloat: parseFloat,
+        String: String,
+        Number: Number,
+        Array: Array,
+        Object: Object,
+        // Helpers
+        random: (min, max) => Math.floor(Math.random() * (max - min + 1)) + min,
+        pick: (...items) => items[Math.floor(Math.random() * items.length)],
+        // Result holder
+        __result__: '',
+    };
+
+    // Wrap code: if it contains 'return', wrap in function; otherwise eval
+    const wrappedCode = code.includes('return ')
+        ? `__result__ = (function() { ${code} })()`
+        : `__result__ = (function() { return (${code}); })()`;
+
+    try {
+        const context = vm.createContext(sandbox);
+        vm.runInContext(wrappedCode, context, { timeout: 1000 }); // 1 second max
+        return String(sandbox.__result__ ?? '');
+    } catch (e) {
+        if (e.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') {
+            return '⚠️ Code execution timed out (1s limit).';
+        }
+        return `⚠️ Code error: ${e.message}`;
+    }
+}
+
+// ============================================================================
+// EXPRESS SERVER & API
+// ============================================================================
+
 /**
  * Start the embedded dashboard server.
  * @param {import('discord.js').Client} client
  */
-function startDashboard(client) {
+async function startDashboard(client) {
     dashboardClient = client;
 
     app = express();
@@ -303,6 +556,17 @@ function startDashboard(client) {
         res.json({ ok: true });
     });
 
+    // ---- CUSTOM COMMANDS API (Enhanced) ----
+
+    // Get available built-in functions
+    app.get('/api/builtin-functions', (req, res) => {
+        const result = {};
+        for (const [key, val] of Object.entries(BUILTIN_FUNCTIONS)) {
+            result[key] = { label: val.label };
+        }
+        res.json(result);
+    });
+
     // Get custom commands
     app.get('/api/custom-commands', (req, res) => {
         const db = getDb();
@@ -310,14 +574,71 @@ function startDashboard(client) {
         res.json(db.custom_commands?.[key] || []);
     });
 
-    // Add custom command
+    // Add custom command (enhanced with type support)
     app.post('/api/custom-commands', (req, res) => {
-        const { trigger, response, description } = req.body;
-        if (!trigger || !response) return res.status(400).json({ error: 'Missing trigger or response' });
+        const { trigger, response, description, type, functionName, code, embed, embedColor, embedTitle } = req.body;
+        if (!trigger) return res.status(400).json({ error: 'Missing trigger' });
+
+        // Validate based on type
+        if (type === 'function' && !BUILTIN_FUNCTIONS[functionName]) {
+            return res.status(400).json({ error: `Unknown function: ${functionName}` });
+        }
+        if (type === 'code' && !code) {
+            return res.status(400).json({ error: 'Code type requires code field' });
+        }
+        if ((!type || type === 'text') && !response) {
+            return res.status(400).json({ error: 'Text type requires response field' });
+        }
+
         const db = getDb();
         if (!db.custom_commands) db.custom_commands = {};
         if (!db.custom_commands[req.session.guildId]) db.custom_commands[req.session.guildId] = [];
-        db.custom_commands[req.session.guildId].push({ trigger: trigger.toLowerCase(), response, description: description || '', createdAt: Date.now() });
+
+        // Check for duplicate trigger
+        const existing = db.custom_commands[req.session.guildId].find(c => c.trigger === trigger.toLowerCase());
+        if (existing) {
+            return res.status(400).json({ error: `Trigger "${trigger}" already exists. Delete it first.` });
+        }
+
+        db.custom_commands[req.session.guildId].push({
+            trigger: trigger.toLowerCase(),
+            type: type || 'text',
+            response: response || '',
+            description: description || '',
+            functionName: functionName || '',
+            code: code || '',
+            embed: embed || false,
+            embedColor: embedColor || '#f5c842',
+            embedTitle: embedTitle || '',
+            createdAt: Date.now(),
+        });
+        saveDatabase();
+        res.json({ ok: true });
+    });
+
+    // Update custom command
+    app.put('/api/custom-commands/:trigger', (req, res) => {
+        const db = getDb();
+        const key = req.session.guildId;
+        const commands = db.custom_commands?.[key];
+        if (!commands) return res.status(404).json({ error: 'No commands found' });
+
+        const idx = commands.findIndex(c => c.trigger === req.params.trigger);
+        if (idx === -1) return res.status(404).json({ error: 'Command not found' });
+
+        const { response, description, type, functionName, code, embed, embedColor, embedTitle } = req.body;
+        commands[idx] = {
+            ...commands[idx],
+            ...(type !== undefined && { type }),
+            ...(response !== undefined && { response }),
+            ...(description !== undefined && { description }),
+            ...(functionName !== undefined && { functionName }),
+            ...(code !== undefined && { code }),
+            ...(embed !== undefined && { embed }),
+            ...(embedColor !== undefined && { embedColor }),
+            ...(embedTitle !== undefined && { embedTitle }),
+            updatedAt: Date.now(),
+        };
         saveDatabase();
         res.json({ ok: true });
     });
@@ -333,6 +654,19 @@ function startDashboard(client) {
         res.json({ ok: true });
     });
 
+    // Test a custom command (without actually sending to Discord)
+    app.post('/api/custom-commands/test', (req, res) => {
+        const { type, response, functionName, code } = req.body;
+        const fakeMessage = {
+            author: { id: '0', username: 'TestUser', displayName: 'TestUser', toString: () => '@TestUser', displayAvatarURL: () => '' },
+            guild: { name: 'TestServer', memberCount: 42, id: '0' },
+            channel: { name: 'test-channel', id: '0', toString: () => '#test-channel' },
+        };
+        const cmd = { type: type || 'text', response, functionName, code };
+        const result = executeCustomCommand(cmd, fakeMessage);
+        res.json({ result });
+    });
+
     // Bot stats
     app.get('/api/stats', (req, res) => {
         const mem = process.memoryUsage();
@@ -343,6 +677,8 @@ function startDashboard(client) {
             commands: dashboardClient.commands?.size || 0,
             memoryMB: (mem.heapUsed / 1024 / 1024).toFixed(1),
             ping: dashboardClient.ws.ping,
+            tunnelActive: !!tunnelUrl,
+            tunnelUrl: tunnelUrl || null,
         });
     });
 
@@ -402,8 +738,11 @@ function startDashboard(client) {
         res.sendFile(path.join(__dirname, '..', 'dashboard', 'public', 'index.html'));
     });
 
-    server.listen(PORT, () => {
+    // Start the HTTP server first, then start the tunnel
+    server.listen(PORT, async () => {
         console.log(`📡 Dashboard server running on port ${PORT}`);
+        // Start Cloudflare tunnel in background
+        await startTunnel();
     }).on('error', (err) => {
         if (err.code === 'EADDRINUSE') {
             console.warn(`⚠️ Dashboard port ${PORT} busy. Dashboard will be unavailable.`);
@@ -413,4 +752,7 @@ function startDashboard(client) {
     });
 }
 
-module.exports = { startDashboard, createSession, validateSession, CONFIG_SCHEMA, PORT };
+module.exports = {
+    startDashboard, createSession, validateSession, CONFIG_SCHEMA, PORT,
+    getPublicUrl, tunnelReady: () => tunnelReady, executeCustomCommand, BUILTIN_FUNCTIONS
+};

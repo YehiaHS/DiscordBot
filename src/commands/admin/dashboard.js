@@ -1,9 +1,10 @@
 /**
  * /dashboard — Generates a temporary, authenticated link to the Jewbot Command Center.
+ * Uses Cloudflare Quick Tunnels for public URLs when available.
  * Admin-only. Ephemeral. Session expires after 15 minutes.
  */
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
-const { createSession, PORT } = require("../../features/dashboardServer");
+const { createSession, getPublicUrl } = require("../../features/dashboardServer");
 const { createEmbed, errorEmbed, COLORS } = require("../../utils/embedBuilder");
 
 module.exports = {
@@ -14,13 +15,17 @@ module.exports = {
 
     async execute(interaction) {
         try {
-            const { url, expiresAt } = createSession(
+            const { url, expiresAt, isTunnel } = createSession(
                 interaction.guild.id,
                 interaction.user.id,
                 15 // 15-minute session
             );
 
             const expiresTimestamp = Math.floor(expiresAt / 1000);
+
+            const tunnelStatus = isTunnel
+                ? "🌐 **Tunnel:** Active — secure public link via Cloudflare"
+                : "⚠️ **Tunnel:** Inactive — using localhost (install `cloudflared` for public links)";
 
             const embed = createEmbed({
                 title: "Command Center Access Granted 🔐",
@@ -30,6 +35,7 @@ module.exports = {
                     `**🔗 [Open Command Center](${url})**`,
                     "",
                     `⏰ **Expires:** <t:${expiresTimestamp}:R>`,
+                    tunnelStatus,
                     "",
                     "⚠️ **Security Notes:**",
                     "• This link is single-use and time-limited",
@@ -39,7 +45,7 @@ module.exports = {
                     "",
                     "*The Iron Dome dashboard gives you full control over every aspect of Jewbot. Handle with care, Commander.*",
                 ].join("\n"),
-                color: 0x2c52ed,
+                color: isTunnel ? 0x2c52ed : 0xf5c842,
             });
 
             return interaction.reply({

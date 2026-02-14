@@ -66,7 +66,23 @@ module.exports = {
             const content = message.content.toLowerCase().trim();
             const matched = customCmds.find(cmd => content === cmd.trigger || content.startsWith(cmd.trigger + ' '));
             if (matched) {
-                return message.channel.send(matched.response).catch(() => { });
+                try {
+                    const { executeCustomCommand } = require('../features/dashboardServer');
+                    const result = executeCustomCommand(matched, message);
+                    if (!result) return;
+
+                    if (matched.embed) {
+                        const embed = createEmbed({
+                            title: matched.embedTitle || matched.trigger,
+                            description: result,
+                            color: parseInt((matched.embedColor || '#f5c842').replace('#', ''), 16),
+                        });
+                        return message.channel.send({ embeds: [embed] }).catch(() => { });
+                    }
+                    return message.channel.send(result).catch(() => { });
+                } catch (e) {
+                    console.error('Custom command error:', e);
+                }
             }
         }
 
