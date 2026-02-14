@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iron Dome V2 | Jewbot Command Center</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@400;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="stars-container"></div>
+
+    <nav class="side-nav">
+        <div class="nav-logo">✡️</div>
+        <button class="nav-item active" data-tab="status">Command</button>
+        <button class="nav-item" data-tab="modules">Modules</button>
+        <button class="nav-item" data-tab="leaderboard">Leaderboard</button>
+        <button class="nav-item" data-tab="logs">Audit Logs</button>
+        <div class="nav-spacer"></div>
+        <button id="settings-btn" class="nav-item">Settings</button>
+    </nav>
+
+    <div class="main-content">
+        <header>
+            <div class="title-area">
+                <h1>IRON DOME <span class="subtitle">Tactical Dashboard</span></h1>
+            </div>
+            <div id="connection-status" class="status-badge connected">Tactical Link Established</div>
+        </header>
+
+        <section id="tab-status" class="tab-content active">
+            <div class="grid-container">
+                <div class="card status-card">
+                    <div class="card-header">
+                        <h2>Core System</h2>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-ring inactive" id="bot-status-ring"></div>
+                        <div class="status-info">
+                            <span id="bot-status-label">OFFLINE</span>
+                            <small id="bot-status-sub">Shabbat Mode Active</small>
+                        </div>
+                        <div class="controls">
+                            <button id="start-btn" class="btn primary">Activate</button>
+                            <button id="stop-btn" class="btn danger" disabled>Shutdown</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mini-stats-card">
+                    <div class="card-header">
+                        <h2>Server Intel</h2>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <label>Members</label>
+                            <span id="stat-members">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <label>Messages Today</label>
+                            <span id="stat-messages">--</span>
+                        </div>
+                        <div class="stat-item">
+                            <label>Mod Actions</label>
+                            <span id="stat-mods">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card console-card full-width">
+                    <div class="card-header">
+                        <h2>Intelligence Feed</h2>
+                        <button id="clear-console" class="btn-clear">Clear</button>
+                    </div>
+                    <div id="console-output" class="console"></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab-modules" class="tab-content">
+            <div class="grid-container">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Module Control</h2>
+                    </div>
+                    <div class="module-list" id="module-toggles">
+                        <!-- Module items will be injected here -->
+                    </div>
+                </div>
+                <div class="card config-card">
+                    <div class="card-header">
+                        <h2>Mossad Orders</h2>
+                    </div>
+                    <div class="config-form">
+                        <label>Interval (Min-Max)</label>
+                        <div class="range-inputs">
+                            <input type="number" id="min-interval" value="30">
+                            <input type="number" id="max-interval" value="60">
+                        </div>
+                        <button id="save-settings" class="btn secondary">Apply Orders</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab-leaderboard" class="tab-content">
+            <div class="card full-width">
+                <div class="card-header">
+                    <h2>Synagogue Ranking</h2>
+                </div>
+                <div class="table-wrapper">
+                    <table id="leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Talmid</th>
+                                <th>XP</th>
+                                <th>Level</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab-logs" class="tab-content">
+            <div class="card full-width">
+                <div class="card-header">
+                    <h2>Audit Logs</h2>
+                </div>
+                <div id="audit-log-list" class="audit-list"></div>
+            </div>
+        </section>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,30 @@
+{
+  "name": "jewbot",
+  "version": "1.0.0",
+  "description": "The ultimate Jewish-themed Discord bot — edgy, meme-y, and full of chutzpah",
+  "main": "src/index.js",
+  "bin": {
+    "jewbot": "bin/jewbot.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node scripts/deploy-commands.js",
+    "dashboard": "node src/dashboard/server.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "jewish",
+    "israel",
+    "memes"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "discord.js": "^14.16.0",
+    "dotenv": "^16.4.0",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
+}
