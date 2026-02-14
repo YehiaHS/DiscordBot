@@ -1,251 +1,261 @@
 /**
- * SQLite database initialization and access layer.
- * Uses better-sqlite3 for synchronous, fast operations.
+ * JSON-based database initialization and access layer.
+ * Purely JavaScript solution for maximum portability (Termux-friendly).
  */
-const Database = require("better-sqlite3");
+const fs = require("fs");
 const path = require("path");
 
-const DB_PATH = path.join(__dirname, "..", "..", "jewbot.db");
+const DB_PATH = path.join(__dirname, "..", "..", "jewbot.json");
 
-let db;
+let data = {
+  xp: {},
+  economy: {},
+  inventory: {},
+  warnings: [],
+  settings: {},
+  reaction_roles: [],
+  logs: [],
+  role_rewards: {}
+};
 
 /**
- * Initialize the database and create tables if they don't exist.
- * @returns {Database} The database instance
+ * Initialize the database and load data from JSON if it exists.
  */
 function initDatabase() {
-  db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS xp (
-      user_id TEXT NOT NULL,
-      guild_id TEXT NOT NULL,
-      xp INTEGER DEFAULT 0,
-      total_messages INTEGER DEFAULT 0,
-      last_xp_at INTEGER DEFAULT 0,
-      PRIMARY KEY (user_id, guild_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS economy (
-      user_id TEXT NOT NULL,
-      guild_id TEXT NOT NULL,
-      balance INTEGER DEFAULT 0,
-      bank INTEGER DEFAULT 0,
-      last_daily INTEGER DEFAULT 0,
-      last_work INTEGER DEFAULT 0,
-      last_rob INTEGER DEFAULT 0,
-      PRIMARY KEY (user_id, guild_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS inventory (
-      user_id TEXT NOT NULL,
-      guild_id TEXT NOT NULL,
-      item_id TEXT NOT NULL,
-      quantity INTEGER DEFAULT 1,
-      PRIMARY KEY (user_id, guild_id, item_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS warnings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      guild_id TEXT NOT NULL,
-      moderator_id TEXT NOT NULL,
-      reason TEXT,
-      created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      guild_id TEXT NOT NULL,
-      key TEXT NOT NULL,
-      value TEXT,
-      PRIMARY KEY (guild_id, key)
-    );
-
-    CREATE TABLE IF NOT EXISTS reaction_roles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      guild_id TEXT NOT NULL,
-      channel_id TEXT NOT NULL,
-      message_id TEXT NOT NULL,
-      emoji TEXT NOT NULL,
-      role_id TEXT NOT NULL,
-      UNIQUE(message_id, emoji)
-    );
-
-    CREATE TABLE IF NOT EXISTS logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      guild_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      content TEXT,
-      user_id TEXT,
-      created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS role_rewards (
-      guild_id TEXT NOT NULL,
-      level INTEGER NOT NULL,
-      role_id TEXT NOT NULL,
-      PRIMARY KEY (guild_id, level)
-    );
-  `);
-
-  return db;
+  if (fs.existsSync(DB_PATH)) {
+    try {
+      const savedData = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+      data = { ...data, ...savedData };
+      console.log("✡️ Database loaded from jewbot.json");
+    } catch (error) {
+      console.error("❌ Failed to parse jewbot.json, starting with fresh data.");
+    }
+  } else {
+    saveDatabase();
+    console.log("✡️ Created new database: jewbot.json");
+  }
 }
 
-/** Get the database instance */
+/**
+ * Save current data to the JSON file.
+ */
+function saveDatabase() {
+  try {
+    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
+  } catch (error) {
+    console.error("❌ Failed to save database:", error);
+  }
+}
+
+/** Get the database instance (not needed for JSON, but kept for compatibility) */
 function getDb() {
-  if (!db) throw new Error("Database not initialized. Call initDatabase() first.");
-  return db;
+  return data;
 }
 
 // ----- XP Operations -----
 
 function getXp(userId, guildId) {
-  const row = getDb().prepare("SELECT * FROM xp WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
-  return row || { user_id: userId, guild_id: guildId, xp: 0, total_messages: 0, last_xp_at: 0 };
+  const key = `${userId}-${guildId}`;
+  return data.xp[key] || { user_id: userId, guild_id: guildId, xp: 0, total_messages: 0, last_xp_at: 0 };
 }
 
 function addXp(userId, guildId, amount) {
-  getDb().prepare(`
-    INSERT INTO xp (user_id, guild_id, xp, total_messages, last_xp_at)
-    VALUES (?, ?, ?, 1, ?)
-    ON CONFLICT(user_id, guild_id)
-    DO UPDATE SET xp = xp + ?, total_messages = total_messages + 1, last_xp_at = ?
-  `).run(userId, guildId, amount, Date.now(), amount, Date.now());
-  return getXp(userId, guildId);
+  const key = `${userId}-${guildId}`;
+  if (!data.xp[key]) {
+    data.xp[key] = { user_id: userId, guild_id: guildId, xp: 0, total_messages: 0, last_xp_at: 0 };
+  }
+  data.xp[key].xp += amount;
+  data.xp[key].total_messages += 1;
+  data.xp[key].last_xp_at = Date.now();
+  saveDatabase();
+  return data.xp[key];
 }
 
 function getLeaderboard(guildId, limit = 10) {
-  return getDb().prepare("SELECT * FROM xp WHERE guild_id = ? ORDER BY xp DESC LIMIT ?").all(guildId, limit);
+  return Object.values(data.xp)
+    .filter(x => x.guild_id === guildId)
+    .sort((a, b) => b.xp - a.xp)
+    .slice(0, limit);
 }
 
 // ----- Economy Operations -----
 
 function getEconomy(userId, guildId) {
-  const row = getDb().prepare("SELECT * FROM economy WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
-  return row || { user_id: userId, guild_id: guildId, balance: 0, bank: 0, last_daily: 0, last_work: 0, last_rob: 0 };
+  const key = `${userId}-${guildId}`;
+  return data.economy[key] || { user_id: userId, guild_id: guildId, balance: 0, bank: 0, last_daily: 0, last_work: 0, last_rob: 0 };
 }
 
 function ensureEconomy(userId, guildId) {
-  getDb().prepare(`
-    INSERT OR IGNORE INTO economy (user_id, guild_id) VALUES (?, ?)
-  `).run(userId, guildId);
+  const key = `${userId}-${guildId}`;
+  if (!data.economy[key]) {
+    data.economy[key] = { user_id: userId, guild_id: guildId, balance: 0, bank: 0, last_daily: 0, last_work: 0, last_rob: 0 };
+    saveDatabase();
+  }
 }
 
 function addBalance(userId, guildId, amount) {
   ensureEconomy(userId, guildId);
-  getDb().prepare("UPDATE economy SET balance = balance + ? WHERE user_id = ? AND guild_id = ?").run(amount, userId, guildId);
-  return getEconomy(userId, guildId);
+  const key = `${userId}-${guildId}`;
+  data.economy[key].balance += amount;
+  saveDatabase();
+  return data.economy[key];
 }
 
 function setBalance(userId, guildId, amount) {
   ensureEconomy(userId, guildId);
-  getDb().prepare("UPDATE economy SET balance = ? WHERE user_id = ? AND guild_id = ?").run(amount, userId, guildId);
+  const key = `${userId}-${guildId}`;
+  data.economy[key].balance = amount;
+  saveDatabase();
 }
 
 function updateLastDaily(userId, guildId) {
   ensureEconomy(userId, guildId);
-  getDb().prepare("UPDATE economy SET last_daily = ? WHERE user_id = ? AND guild_id = ?").run(Date.now(), userId, guildId);
+  const key = `${userId}-${guildId}`;
+  data.economy[key].last_daily = Date.now();
+  saveDatabase();
 }
 
 function updateLastWork(userId, guildId) {
   ensureEconomy(userId, guildId);
-  getDb().prepare("UPDATE economy SET last_work = ? WHERE user_id = ? AND guild_id = ?").run(Date.now(), userId, guildId);
+  const key = `${userId}-${guildId}`;
+  data.economy[key].last_work = Date.now();
+  saveDatabase();
 }
 
 function updateLastRob(userId, guildId) {
   ensureEconomy(userId, guildId);
-  getDb().prepare("UPDATE economy SET last_rob = ? WHERE user_id = ? AND guild_id = ?").run(Date.now(), userId, guildId);
+  const key = `${userId}-${guildId}`;
+  data.economy[key].last_rob = Date.now();
+  saveDatabase();
 }
 
 function getEconomyLeaderboard(guildId, limit = 10) {
-  return getDb().prepare("SELECT * FROM economy WHERE guild_id = ? ORDER BY (balance + bank) DESC LIMIT ?").all(guildId, limit);
+  return Object.values(data.economy)
+    .filter(e => e.guild_id === guildId)
+    .sort((a, b) => (b.balance + b.bank) - (a.balance + a.bank))
+    .slice(0, limit);
 }
 
 // ----- Inventory Operations -----
 
 function getInventory(userId, guildId) {
-  return getDb().prepare("SELECT * FROM inventory WHERE user_id = ? AND guild_id = ?").all(userId, guildId);
+  const key = `${userId}-${guildId}`;
+  return data.inventory[key] ? Object.values(data.inventory[key]) : [];
 }
 
 function hasItem(userId, guildId, itemId) {
-  const row = getDb().prepare("SELECT quantity FROM inventory WHERE user_id = ? AND guild_id = ? AND item_id = ?").get(userId, guildId, itemId);
-  return row && row.quantity > 0;
+  const key = `${userId}-${guildId}`;
+  return data.inventory[key] && data.inventory[key][itemId] && data.inventory[key][itemId].quantity > 0;
 }
 
 function addItem(userId, guildId, itemId) {
-  getDb().prepare(`
-    INSERT INTO inventory (user_id, guild_id, item_id, quantity)
-    VALUES (?, ?, ?, 1)
-    ON CONFLICT(user_id, guild_id, item_id)
-    DO UPDATE SET quantity = quantity + 1
-  `).run(userId, guildId, itemId);
+  const key = `${userId}-${guildId}`;
+  if (!data.inventory[key]) data.inventory[key] = {};
+  if (!data.inventory[key][itemId]) {
+    data.inventory[key][itemId] = { user_id: userId, guild_id: guildId, item_id: itemId, quantity: 0 };
+  }
+  data.inventory[key][itemId].quantity += 1;
+  saveDatabase();
 }
 
 // ----- Warning Operations -----
 
 function addWarning(userId, guildId, moderatorId, reason) {
-  getDb().prepare("INSERT INTO warnings (user_id, guild_id, moderator_id, reason) VALUES (?, ?, ?, ?)").run(userId, guildId, moderatorId, reason);
+  data.warnings.push({
+    id: data.warnings.length + 1,
+    user_id: userId,
+    guild_id: guildId,
+    moderator_id: moderatorId,
+    reason,
+    created_at: Math.floor(Date.now() / 1000)
+  });
+  saveDatabase();
 }
 
 function getWarnings(userId, guildId) {
-  return getDb().prepare("SELECT * FROM warnings WHERE user_id = ? AND guild_id = ? ORDER BY created_at DESC").all(userId, guildId);
+  return data.warnings
+    .filter(w => w.user_id === userId && w.guild_id === guildId)
+    .sort((a, b) => b.created_at - a.created_at);
 }
 
 // ----- Settings Operations -----
 
 function getSetting(guildId, key) {
-  const row = getDb().prepare("SELECT value FROM settings WHERE guild_id = ? AND key = ?").get(guildId, key);
-  return row ? row.value : null;
+  const sKey = `${guildId}-${key}`;
+  return data.settings[sKey] || null;
 }
 
 function setSetting(guildId, key, value) {
-  getDb().prepare(`
-    INSERT INTO settings (guild_id, key, value) VALUES (?, ?, ?)
-    ON CONFLICT(guild_id, key) DO UPDATE SET value = ?
-  `).run(guildId, key, value, value);
+  const sKey = `${guildId}-${key}`;
+  data.settings[sKey] = value;
+  saveDatabase();
 }
 
 // ----- Reaction Role Operations -----
 
 function addReactionRole(guildId, channelId, messageId, emoji, roleId) {
-  getDb().prepare(`
-    INSERT INTO reaction_roles (guild_id, channel_id, message_id, emoji, role_id)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(message_id, emoji) DO UPDATE SET role_id = ?
-  `).run(guildId, channelId, messageId, emoji, roleId, roleId);
+  const existing = data.reaction_roles.findIndex(r => r.message_id === messageId && r.emoji === emoji);
+  const rr = { id: Date.now(), guild_id: guildId, channel_id: channelId, message_id: messageId, emoji, role_id: roleId };
+  if (existing > -1) {
+    data.reaction_roles[existing] = rr;
+  } else {
+    data.reaction_roles.push(rr);
+  }
+  saveDatabase();
 }
 
 function getReactionRole(messageId, emoji) {
-  return getDb().prepare("SELECT * FROM reaction_roles WHERE message_id = ? AND emoji = ?").get(messageId, emoji);
+  return data.reaction_roles.find(r => r.message_id === messageId && r.emoji === emoji);
 }
 
 function removeReactionRole(messageId, emoji) {
-  getDb().prepare("DELETE FROM reaction_roles WHERE message_id = ? AND emoji = ?").run(messageId, emoji);
+  data.reaction_roles = data.reaction_roles.filter(r => !(r.message_id === messageId && r.emoji === emoji));
+  saveDatabase();
 }
 
 // ----- Log Operations -----
 
 function addLog(guildId, type, content, userId = null) {
-  getDb().prepare("INSERT INTO logs (guild_id, type, content, user_id) VALUES (?, ?, ?, ?)").run(guildId, type, content, userId);
+  data.logs.push({
+    id: Date.now(),
+    guild_id: guildId,
+    type,
+    content,
+    user_id: userId,
+    created_at: Math.floor(Date.now() / 1000)
+  });
+  // Keep logs at reasonable size
+  if (data.logs.length > 1000) data.logs.shift();
+  saveDatabase();
 }
 
 function getLogs(guildId, limit = 50) {
-  return getDb().prepare("SELECT * FROM logs WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?").all(guildId, limit);
+  return data.logs
+    .filter(l => l.guild_id === guildId)
+    .sort((a, b) => b.created_at - a.created_at)
+    .slice(0, limit);
 }
 
 // ----- Role Reward Operations -----
 
 function addRoleReward(guildId, level, roleId) {
-  getDb().prepare("INSERT INTO role_rewards (guild_id, level, role_id) VALUES (?, ?, ?) ON CONFLICT(guild_id, level) DO UPDATE SET role_id = ?").run(guildId, level, roleId, roleId);
+  if (!data.role_rewards[guildId]) data.role_rewards[guildId] = {};
+  data.role_rewards[guildId][level] = roleId;
+  saveDatabase();
 }
 
 function getRoleRewards(guildId) {
-  return getDb().prepare("SELECT * FROM role_rewards WHERE guild_id = ? ORDER BY level ASC").all(guildId);
+  if (!data.role_rewards[guildId]) return [];
+  return Object.entries(data.role_rewards[guildId])
+    .map(([level, role_id]) => ({ level: parseInt(level), role_id }))
+    .sort((a, b) => a.level - b.level);
 }
 
 function removeRoleReward(guildId, level) {
-  getDb().prepare("DELETE FROM role_rewards WHERE guild_id = ? AND level = ?").run(guildId, level);
+  if (data.role_rewards[guildId]) {
+    delete data.role_rewards[guildId][level];
+    saveDatabase();
+  }
 }
 
 module.exports = {
@@ -260,3 +270,4 @@ module.exports = {
   addLog, getLogs,
   addRoleReward, getRoleRewards, removeRoleReward,
 };
+
